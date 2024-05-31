@@ -7,6 +7,11 @@ from scipy.io import loadmat
 from scipy.signal import sosfiltfilt, butter
 from scipy import interpolate
 import matplotlib.pyplot as plt
+import navsim as ns
+import DEM_call as DM
+import pyhigh as ph
+import pvlib.location as pv
+import Baro_UKF as baro
 
 #Open Config file
 scriptPath = Path(__file__).parent.resolve()
@@ -27,6 +32,7 @@ input_data=loadmat(data_path,struct_as_record=False)
 
 lat=np.deg2rad(input_data["Lat"]).transpose()
 lon=np.deg2rad(input_data["Lon"]).transpose()
+alt=input_data["Alt"]
 truth_time=input_data["time"].squeeze()
 
 #smooth LLA data to create a truth path
@@ -35,9 +41,15 @@ truth_lat = sosfiltfilt(sos, lat).transpose()
 truth_lon = sosfiltfilt(sos, lon).transpose()
 
 #convert truth LLA to truth ENU
-truth_enu = np.asarray(pm.geodetic2enu(truth_lat,truth_lon,np.zeros_like(truth_lat),truth_lat[0],truth_lon[0],0,ell=pm.Ellipsoid.from_name('wgs84'),deg=False)).squeeze()
+truth_enu = np.asarray(pm.geodetic2enu(truth_lat,truth_lon,alt,truth_lat[0],truth_lon[0],alt[0],ell=pm.Ellipsoid.from_name('wgs84'),deg=False)).squeeze()
 truth_east=truth_enu[0,:]
 truth_north=truth_enu[1,:]
+truth_up=truth_enu[2,:]
+
+truth_ecef=np.asarray(pm.geodetic2ecef(truth_lat,truth_lon,alt,ell=pm.Ellipsoid.from_name('wgs84'),deg=False)).squeeze()
+truth_x=truth_ecef[0,:]
+truth_y=truth_ecef[1,:]
+truth_z=truth_ecef[2,:]
 
 #upsample position values to decrease size of delta positions
 InterpolatorE = interpolate.interp1d(truth_time, truth_east, fill_value="extrapolate")
@@ -70,7 +82,7 @@ for ii in range(len(time_upsampled)-1):
         time_step[0,ii]=time_upsampled[ii]
         total_dist=0
 
-#reduce larger matricies to onlt step instance measurments
+#reduce larger matricies to only step instance measurments
 east_step[0,0]=1
 north_step[0,0]=1
 time_step[0,0]=1
@@ -80,6 +92,12 @@ time_step = time_step[np.not_equal(time_step,0)]
 east_step[0]=0
 north_step[0]=0
 time_step[0]=0
+elevation_step=np.zeros([1,len(east_step)])
+
+# for ii in range(len(east_step)):
+#     LLA_step=np.asarray(pm.enu2geodetic(east_step[ii],north_step[ii],0,truth_lat[0][0],truth_lon[0][0],alt[0][0],ell=pm.Ellipsoid.from_name('wgs84'),deg=False)).squeeze()
+#     #elevation_step[0][ii]=DM.elevation_google(np.rad2deg(LLA_step[0]),np.rad2deg(LLA_step[1]))
+#     elevation_step[0][ii]=pv.lookup_altitude(np.rad2deg(LLA_step[0]),np.rad2deg(LLA_step[1]))
 
 #initialize variables for truth measurment creation
 del_east=np.diff(east_step,prepend=0)
@@ -126,6 +144,24 @@ for ii in range(np.size(heading_truth)-1):
 
 heading_measurment=heading_truth+heading_noise+heading_bias
 
+#put noise and bias on barometer values to create measurements
+barometer_sigma: str =config["BarometerNoise"]
+barometer_noise = np.random.normal(0, barometer_sigma, elevation_step.size)
+
+barometer_tau: str =config["BarometerBiasTau"]
+barometer_bias_sigma: str =config["BarometerBiasNoise"]
+barometer_bias=np.zeros([1,np.size(elevation_step)])
+
+#bias is estimated as FOGM
+for ii in range(np.size(elevation_step)-1):
+    barometer_bias[0,ii+1]=np.exp(-(1/barometer_tau)*dt[ii])*barometer_bias[0,ii]+np.random.normal(0, barometer_bias_sigma, 1)
+
+barometer_measurment=elevation_step+barometer_noise+barometer_bias
+
+
+# init_LLA=[truth_lat[0][0],truth_lon[0][0],alt[0][0]]
+# states_UKF=baro.UKF_Run(SL_measurment,heading_measurment,barometer_measurment,dt,init_LLA)
+
 #initialize raw position measurments
 raw_east=np.zeros([1,np.size(step_length_truth)+1])
 raw_north=np.zeros([1,np.size(step_length_truth)+1])
@@ -135,7 +171,45 @@ for ii in range(np.size(step_length_truth)):
     raw_east[0,ii+1]=raw_east[0,ii]+SL_measurment[0,ii]*np.sin(heading_measurment[0,ii])
     raw_north[0,ii+1]=raw_north[0,ii]+SL_measurment[0,ii]*np.cos(heading_measurment[0,ii])
 
+# plt.figure()
+# plt.plot(raw_east[0,:],raw_north[0,:])
+# plt.plot(truth_east,truth_north)
+# plt.plot(states_UKF[1,:],states_UKF[0,:])
+# plt.legend(['raw','truth','UKF'])
 
-plt.figure()
-plt.plot(raw_east[0,:],raw_north[0,:])
-plt.plot(truth_east,truth_north)
+#difference position measurments
+delta_x=np.diff(truth_x,prepend=0)
+delta_y=np.diff(truth_y,prepend=0)
+delta_z=np.diff(truth_z,prepend=0)
+dt_vel=np.diff(truth_time,prepend=0)
+
+#calculate velocities
+vel_x=np.divide(delta_x,dt_vel)
+vel_x[vel_x==np.inf]=0
+vel_x[vel_x==-np.inf]=0
+vel_x[0]=0
+vel_y=np.divide(delta_y,dt_vel)
+vel_y[vel_y==np.inf]=0
+vel_y[vel_y==-np.inf]=0
+vel_y[0]=0
+vel_z=np.divide(delta_z,dt_vel)
+vel_z[vel_z==np.inf]=0
+vel_z[vel_z==-np.inf]=0
+vel_z[0]=0
+
+#use navsim to generate LEO observables
+rx_pos=truth_ecef
+rx_vel=np.asarray([vel_x,vel_y,vel_z])
+
+PROJECT_PATH = Path(__file__).parent
+CONFIG_PATH ="."
+DATA_PATH = PROJECT_PATH / "data"
+
+configuration = ns.get_configuration(configuration_path=PROJECT_PATH)
+sim = ns.get_signal_simulation(simulation_type="measurement", configuration=configuration)
+
+sim.generate_truth(rx_pos=rx_pos.transpose(),rx_vel=rx_vel.transpose())
+sim.simulate()
+
+observables = sim.observables
+
