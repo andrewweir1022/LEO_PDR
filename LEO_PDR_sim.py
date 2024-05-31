@@ -12,6 +12,7 @@ import DEM_call as DM
 import pyhigh as ph
 import pvlib.location as pv
 import Baro_UKF as baro
+import pandas as pd
 
 #Open Config file
 scriptPath = Path(__file__).parent.resolve()
@@ -159,8 +160,8 @@ for ii in range(np.size(elevation_step)-1):
 barometer_measurment=elevation_step+barometer_noise+barometer_bias
 
 
-# init_LLA=[truth_lat[0][0],truth_lon[0][0],alt[0][0]]
-# states_UKF=baro.UKF_Run(SL_measurment,heading_measurment,barometer_measurment,dt,init_LLA)
+init_LLA=[truth_lat[0][0],truth_lon[0][0],alt[0][0]]
+states_UKF=baro.UKF_Run(SL_measurment,heading_measurment,barometer_measurment,dt,init_LLA)
 
 #initialize raw position measurments
 raw_east=np.zeros([1,np.size(step_length_truth)+1])
@@ -176,7 +177,7 @@ for ii in range(np.size(step_length_truth)):
 # plt.plot(truth_east,truth_north)
 # plt.plot(states_UKF[1,:],states_UKF[0,:])
 # plt.legend(['raw','truth','UKF'])
-
+# %%
 #difference position measurments
 delta_x=np.diff(truth_x,prepend=0)
 delta_y=np.diff(truth_y,prepend=0)
@@ -201,15 +202,24 @@ vel_z[0]=0
 rx_pos=truth_ecef
 rx_vel=np.asarray([vel_x,vel_y,vel_z])
 
+#setting up navsim
 PROJECT_PATH = Path(__file__).parent
 CONFIG_PATH ="."
-DATA_PATH = PROJECT_PATH / "data"
+DATA_PATH = PROJECT_PATH
 
 configuration = ns.get_configuration(configuration_path=PROJECT_PATH)
 sim = ns.get_signal_simulation(simulation_type="measurement", configuration=configuration)
 
+#pulling observables
 sim.generate_truth(rx_pos=rx_pos.transpose(),rx_vel=rx_vel.transpose())
 sim.simulate()
-
 observables = sim.observables
 
+#pulling doppler
+doppler=np.zeros((1,len(observables)))
+for ii in range(len(observables)):
+    ind_observables=observables[ii]
+    Irid=ind_observables['IRIDIUM 165']
+    doppler[0,ii]=Irid.carrier_doppler
+# sim.to_hdf(output_dir_path=DATA_PATH)
+# %%
