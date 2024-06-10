@@ -4,6 +4,13 @@ PathToInput: /home/anw0060/Documents/gnss_plus/LEO_PDR/Input_trajectory/Short_Tr
 
 StepLengthNoise: 0.5 #meters
 HeadingNoise: 5 #degrees
+HeadingInit: 10 #degrees
+DeltaPositionNoise: 1 #meters
 
 HeadingBiasTau: 360
-HeadingBiasNoise: 0 #degrees
+HeadingBiasNoise: 1 #degrees
+
+BarometerBiasTau: 300
+BarometerBiasNoise: 0.0001 #meters
+
+BarometerNoise: 10 #meters
