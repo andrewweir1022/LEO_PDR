@@ -137,13 +137,14 @@ heading_noise = np.random.normal(0, np.deg2rad(heading_sigma), heading_truth.siz
 
 heading_tau: str =config["HeadingBiasTau"]
 heading_bias_sigma: str =config["HeadingBiasNoise"]
+heading_init: str =config["HeadingInit"]
 heading_bias=np.zeros([1,np.size(heading_truth)])
 
 #bias is estimated as FOGM
 for ii in range(np.size(heading_truth)-1):
     heading_bias[0,ii+1]=np.exp(-(1/heading_tau)*dt[ii])*heading_bias[0,ii]+np.random.normal(0, np.deg2rad(heading_bias_sigma), 1)
 
-heading_measurment=heading_truth+heading_noise+heading_bias
+heading_measurment=heading_truth+heading_noise+heading_bias+np.deg2rad(heading_init)
 
 #put noise and bias on barometer values to create measurements
 barometer_sigma: str =config["BarometerNoise"]
@@ -161,7 +162,7 @@ barometer_measurment=elevation_step+barometer_noise+barometer_bias
 
 
 init_LLA=[truth_lat[0][0],truth_lon[0][0],alt[0][0]]
-states_UKF=baro.UKF_Run(SL_measurment,heading_measurment,barometer_measurment,dt,init_LLA)
+# states_UKF=baro.UKF_Run(SL_measurment,heading_measurment,barometer_measurment,dt,init_LLA)
 
 #initialize raw position measurments
 raw_east=np.zeros([1,np.size(step_length_truth)+1])
@@ -172,11 +173,11 @@ for ii in range(np.size(step_length_truth)):
     raw_east[0,ii+1]=raw_east[0,ii]+SL_measurment[0,ii]*np.sin(heading_measurment[0,ii])
     raw_north[0,ii+1]=raw_north[0,ii]+SL_measurment[0,ii]*np.cos(heading_measurment[0,ii])
 
-# plt.figure()
-# plt.plot(raw_east[0,:],raw_north[0,:])
-# plt.plot(truth_east,truth_north)
+plt.figure()
+plt.plot(raw_east[0,:],raw_north[0,:])
+plt.plot(truth_east,truth_north)
 # plt.plot(states_UKF[1,:],states_UKF[0,:])
-# plt.legend(['raw','truth','UKF'])
+plt.legend(['raw','truth','UKF'])
 # %%
 #difference position measurments
 delta_x=np.diff(truth_x,prepend=0)
