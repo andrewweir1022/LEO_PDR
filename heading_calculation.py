@@ -23,8 +23,8 @@ def leo_pdr_heading(lla_0:np.array,
                     sat_vel:np.array):
     
     # 0 vertical pos and vel
-    current_ecef = conversions.enu2ecef(current_pos[0],current_pos[1],0,lla_0[0],lla_0[1],lla_0[2])
-    current_ecef_vel = conversions.enu2uvw(current_vel[0],current_vel[1],0,lla_0[0],lla_0[1])
+    current_ecef = conversions.enu2ecef(current_pos[0],current_pos[1],0,lla_0[0],lla_0[1],lla_0[2],deg=False)
+    current_ecef_vel = conversions.enu2uvw(current_vel[0],current_vel[1],0,lla_0[0],lla_0[1],deg=False)
     
     # Unit Vectors and gemoetry, we'll see how the clock bias assumption goes
     u_vecs,_ = unit_vectors(current_ecef,sat_pos)
