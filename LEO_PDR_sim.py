@@ -8,11 +8,12 @@ from scipy.signal import sosfiltfilt, butter
 from scipy import interpolate
 import matplotlib.pyplot as plt
 import navsim as ns
-import DEM_call as DM
-import pyhigh as ph
-import pvlib.location as pv
-import Baro_UKF as baro
+# import DEM_call as DM
+# import pyhigh as ph
+# import pvlib.location as pv
+# import Baro_UKF as baro
 import pandas as pd
+from heading_calculation import leo_pdr_heading
 
 #Open Config file
 scriptPath = Path(__file__).parent.resolve()
@@ -130,6 +131,7 @@ for ii in range(len(east_step)):
 SL_sigma: str =config["StepLengthNoise"]
 SL_noise = np.random.normal(0, SL_sigma, step_length_truth.size)
 SL_measurment=step_length_truth+SL_noise
+SL_measurment[0,0]=0
 
 #put noise and bias on heading values to create measurements
 heading_sigma: str =config["HeadingNoise"]
@@ -160,6 +162,11 @@ for ii in range(np.size(elevation_step)-1):
 
 barometer_measurment=elevation_step+barometer_noise+barometer_bias
 
+df_time=pd.DataFrame(time_step.transpose(),columns=['time'])
+df_heading=pd.DataFrame(heading_measurment.transpose(),columns=['heading'])
+df_SL=pd.DataFrame(SL_measurment.transpose(),columns=['step_length'])
+df_dt=pd.DataFrame(dt.transpose(),columns=['PDR_dt'])
+df_PDR=pd.concat([df_time,df_heading,df_SL,df_dt],axis=1)
 
 init_LLA=[truth_lat[0][0],truth_lon[0][0],alt[0][0]]
 # states_UKF=baro.UKF_Run(SL_measurment,heading_measurment,barometer_measurment,dt,init_LLA)
@@ -215,12 +222,83 @@ sim = ns.get_signal_simulation(simulation_type="measurement", configuration=conf
 sim.generate_truth(rx_pos=rx_pos.transpose(),rx_vel=rx_vel.transpose())
 sim.simulate()
 observables = sim.observables
+sat_states=sim.emitter_states
+
+sat_num=np.zeros((1,len(observables)))
+#detrmining maximum number of LEO observables in run
+for ii in range((len(observables))):
+    ind_observables=observables[ii]
+    sat_num[0,ii]=len(ind_observables)
+
+#initializing LEO variables
+num_sats_max=max(sat_num.transpose())
+doppler=np.empty((int(num_sats_max[0]),len(observables)))
+doppler[:]=np.nan
+sat_pos=np.empty((int(num_sats_max[0]),len(observables),3))
+sat_pos[:]=np.nan
+sat_vel=np.empty((int(num_sats_max[0]),len(observables),3))
+sat_vel[:]=np.nan
+Hz=1
+Dt=1/Hz
+LEO_time=np.zeros((1,len(observables)+1))
+ephemeris=sat_states.ephemeris
 
 #pulling doppler
-doppler=np.zeros((1,len(observables)))
 for ii in range(len(observables)):
     ind_observables=observables[ii]
-    Irid=ind_observables['IRIDIUM 165']
-    doppler[0,ii]=Irid.carrier_doppler
-# sim.to_hdf(output_dir_path=DATA_PATH)
+    keys=list(ind_observables)
+    ephem_obs=ephemeris[ii]
+    for kk in range((len(keys))):
+        Irid=ind_observables[keys[kk]]
+        doppler[kk,ii]=Irid.carrier_doppler
+
+        Sat_state=ephem_obs[keys[kk]]
+        sat_pos[kk,ii,:]=Sat_state.pos
+        sat_vel[kk,ii,:]=Sat_state.vel
+    LEO_time[0,ii+1]=LEO_time[0,ii]+Dt
+LEO_time=np.delete(LEO_time,-1)
+
+#creating LEO DF
+df_time_LEO=pd.DataFrame(LEO_time.transpose(),columns=['time'])
+df_doppler=pd.DataFrame()
+for ii in range((int(num_sats_max[0]))):
+    doppler_idx=pd.DataFrame(doppler[ii,:].transpose(),columns=[f'Doppler{ii}'])
+    df_doppler=pd.concat([df_doppler,doppler_idx],axis=1)
+df_LEO=pd.concat([df_time_LEO,df_doppler],axis=1)
+
+#ordering all input measurments
+input_data=pd.merge_ordered(df_PDR,df_LEO, on="time")
+input_data=input_data.to_numpy()
+
+heading_residual=0
+n=0
+East=0
+North=0
+for ii in range((len(input_data))):
+    if ~np.isnan(input_data[ii,1]):
+        delta_E=input_data[ii,2] * np.sin(input_data[ii,1]-heading_residual)
+        delta_N=input_data[ii,2] * np.cos(input_data[ii,1]-heading_residual)
+        Vel_E=delta_E/input_data[ii,3]
+        Vel_N=delta_N/input_data[ii,3]
+        East=East+delta_E
+        North=North+delta_N
+        heading_stg=input_data[ii,1]
+        if np.isnan(Vel_E):
+            Vel_E=0
+            Vel_N=0
+    if ~np.isnan(input_data[ii,4]):
+        dopps=input_data[ii,4:-1]
+        dopp_num=len(dopps)
+        dopp_pos=sat_pos[0:dopp_num,n,:]
+        dopp_vel=sat_vel[0:dopp_num,n,:]
+        n=n+1
+        user_pos=np.asarray([East,North])
+        user_vel=np.asarray([Vel_E,Vel_N])
+
+        leo_heading=leo_pdr_heading(init_LLA,dopps,user_pos,user_vel,dopp_pos,dopp_vel)
+        p=1
+
+    
+    
+
 # %%
