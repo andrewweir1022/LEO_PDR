@@ -5,6 +5,7 @@
 import numpy as np
 import math
 import navtools.conversions as conversions
+import pymap3d as pm
 
 def unit_vectors(rx_pos:np.ndarray,sat_pos:np.ndarray):
     # Function to extract the unit vectors and geometric range estimates for GPS positioning
@@ -42,6 +43,12 @@ def leo_pdr_heading(lla_0:np.array,
     # Estimate user velocities
     del_y = measured_doppler - y_hat
     vel_est = np.linalg.pinv(u_vecs)@del_y
-    heading = math.atan2(vel_est[0],vel_est[1])
+
+    # Rotate back into enu
+    # vel_est_enu = conversions.ecef2enu(vel_est[0],vel_est[1],vel_est[2],lla_0[0],lla_0[1],lla_0[2],deg=False)
+    vel_est_enu = pm.ecef2enuv(vel_est[0],vel_est[1],vel_est[2],lla_0[0],lla_0[1],deg=False)
+
+    # Estimate heading
+    heading = math.atan2(vel_est_enu[0],vel_est_enu[1])
 
     return heading
