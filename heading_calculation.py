@@ -52,3 +52,55 @@ def leo_pdr_heading(lla_0:np.array,
     heading = math.atan2(vel_est_enu[0],vel_est_enu[1])
 
     return heading
+
+
+def leo_pdr_heading_enu(lla_0:np.array,
+                        measured_doppler:np.array,
+                        current_pos:np.array,
+                        current_vel:np.array,
+                        sat_pos:np.array,
+                        sat_vel:np.array):
+
+    # Rotate satellite positions in enu
+    num_sats = np.ma.size(sat_pos,0)
+    sat_pos_enu = []
+    sat_vel_enu = []
+    for count in range(num_sats):
+        sat_pos_enu.append(conversions.ecef2enu(sat_pos[count,0],sat_pos[count,1],sat_pos[count,2],lla_0[0],lla_0[1],lla_0[2],deg=False))
+        sat_vel_enu.append(pm.ecef2enuv(sat_vel[count,0],sat_vel[count,1],sat_vel[count,2],lla_0[0],lla_0[1],deg=False))
+
+    sat_pos_enu = np.array(sat_pos_enu)
+    sat_vel_enu = np.array(sat_vel_enu)
+    
+    # Turn EN into ENU
+    current_pos = np.append(current_pos,0)
+    current_vel = np.append(current_vel,0)
+
+    # Unit Vectors and gemoetry, we'll see how the clock bias assumption goes
+    u_vecs,_ = unit_vectors(current_pos,sat_pos_enu)
+
+    # Estimated dopplers are velocity difference projected onto unit vectors
+    sat_rel_vel = sat_vel_enu - current_vel
+    dopp_hat = []
+
+    
+    for count in range(num_sats):
+        dopp_hat.append(np.dot(u_vecs[count,0:2],sat_rel_vel[count,0:2]) + u_vecs[count,2]*sat_vel_enu[count,2])
+        
+    y_hat = np.array(dopp_hat)
+
+    # Estimate user velocities
+    del_y = measured_doppler - y_hat
+    vel_est = np.linalg.pinv(u_vecs[:,0:2])@del_y
+
+    # Rotate back into enu
+    # vel_est_enu = conversions.ecef2enu(vel_est[0],vel_est[1],vel_est[2],lla_0[0],lla_0[1],lla_0[2],deg=False)
+    # vel_est_enu = pm.ecef2enuv(vel_est[0],vel_est[1],vel_est[2],lla_0[0],lla_0[1],deg=False)
+
+    # Estimate heading
+    heading = math.atan2(vel_est[0],vel_est[1])
+
+    return heading
+
+
+
