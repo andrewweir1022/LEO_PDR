@@ -13,7 +13,8 @@ import navsim as ns
 # import pvlib.location as pv
 # import Baro_UKF as baro
 import pandas as pd
-from heading_calculation import leo_pdr_heading
+from heading_calculation import leo_pdr_heading_enu, leo_pdr_heading
+import navtools.conversions as conversions
 
 #Open Config file
 scriptPath = Path(__file__).parent.resolve()
@@ -64,10 +65,20 @@ north_upsampled=InterpolatorN(time_upsampled)
 delta_east=np.diff(east_upsampled)
 delta_north=np.diff(north_upsampled)
 
+sos2 = butter(4, 0.001, output="sos")
+delta_east = sosfiltfilt(sos2, delta_east)
+delta_north = sosfiltfilt(sos2, delta_north)
+# %%
+
 #define variables at step instances
-east_step=np.zeros([1,len(east_upsampled)])
-north_step=np.zeros([1,len(north_upsampled)])
-time_step=np.zeros([1,len(north_upsampled)])
+east_step=np.empty([1,len(east_upsampled)])
+east_step[:]=np.nan
+north_step=np.empty([1,len(north_upsampled)])
+north_step[:]=np.nan
+time_step=np.empty([1,len(time_upsampled)])
+time_step[:]=np.nan
+total_dist_stg=np.empty([1,len(north_upsampled)])
+total_dist_stg[:]=np.nan
 
 #loop through upsampled positions to create step length chuncks
 total_dist=0
@@ -82,18 +93,14 @@ for ii in range(len(time_upsampled)-1):
         east_step[0,ii]=east_upsampled[ii]
         north_step[0,ii]=north_upsampled[ii]
         time_step[0,ii]=time_upsampled[ii]
+        total_dist_stg[0,ii]=total_dist
         total_dist=0
 
 #reduce larger matricies to only step instance measurments
-east_step[0,0]=1
-north_step[0,0]=1
-time_step[0,0]=1
-east_step = east_step[np.not_equal(east_step,0)]
-north_step = north_step[np.not_equal(north_step,0)]
-time_step = time_step[np.not_equal(time_step,0)]
-east_step[0]=0
-north_step[0]=0
-time_step[0]=0
+east_step = east_step[~np.isnan(east_step)]
+north_step = north_step[~np.isnan(north_step)]
+time_step = time_step[~np.isnan(time_step)]
+total_dist_step=total_dist_stg[~np.isnan(total_dist_stg)]
 elevation_step=np.zeros([1,len(east_step)])
 
 # for ii in range(len(east_step)):
@@ -102,36 +109,38 @@ elevation_step=np.zeros([1,len(east_step)])
 #     elevation_step[0][ii]=pv.lookup_altitude(np.rad2deg(LLA_step[0]),np.rad2deg(LLA_step[1]))
 
 #initialize variables for truth measurment creation
-del_east=np.diff(east_step,prepend=0)
-del_north=np.diff(north_step,prepend=0)
+del_east_step=np.diff(east_step,prepend=0)
+del_north_step=np.diff(north_step,prepend=0)
+del_east_step = sosfiltfilt(sos, del_east_step)
+del_north_step = sosfiltfilt(sos, del_north_step)
 step_length_truth=np.zeros([1,len(east_step)])
 heading_truth=np.zeros([1,len(east_step)])
 dt=np.diff(time_step,prepend=0)
-vel_e=np.zeros([1,len(east_step)])
-vel_n=np.zeros([1,len(east_step)])
+vel_e_truth=np.zeros([1,len(east_step)])
+vel_n_truth=np.zeros([1,len(east_step)])
 
+# %%
 #loop through each position at step instance
 for ii in range(len(east_step)):
 
     #create step length truth
-    step_length_truth[0,ii]=np.sqrt(del_east[ii]**2+del_north[ii]**2)
+    step_length_truth[0,ii]=np.sqrt(del_east_step[ii]**2+del_north_step[ii]**2)
     #create heading truth (rad)
-    heading_truth[0,ii]=np.arctan2(del_east[ii], del_north[ii])
+    heading_truth[0,ii]=np.arctan2(del_east_step[ii], del_north_step[ii])
 
     #create delta positions
     delta_e = step_length_truth[0,ii] * np.sin(heading_truth[0,ii])
     delta_n = step_length_truth[0,ii] * np.cos(heading_truth[0,ii])
     
     #convert delta positions into velocities
-    if ii>0:
-        vel_e[0,ii]=delta_e/dt[ii]
-        vel_n[0,ii]=delta_n/dt[ii]
+    vel_e_truth[0,ii]=delta_e/dt[ii]
+    vel_n_truth[0,ii]=delta_n/dt[ii]
 
+# %%
 #put noise on step length values to create measurments
 SL_sigma: str =config["StepLengthNoise"]
 SL_noise = np.random.normal(0, SL_sigma, step_length_truth.size)
 SL_measurment=step_length_truth+SL_noise
-SL_measurment[0,0]=0
 
 #put noise and bias on heading values to create measurements
 heading_sigma: str =config["HeadingNoise"]
@@ -144,7 +153,7 @@ heading_bias=np.zeros([1,np.size(heading_truth)])
 
 #bias is estimated as FOGM
 for ii in range(np.size(heading_truth)-1):
-    heading_bias[0,ii+1]=np.exp(-(1/heading_tau)*dt[ii])*heading_bias[0,ii]+np.random.normal(0, np.deg2rad(heading_bias_sigma), 1)
+    heading_bias[0,ii+1]=np.exp(-(1/heading_tau)*dt[ii])*heading_bias[0,ii]+np.random.normal(0, np.deg2rad(heading_bias_sigma), size=None)
 
 heading_measurment=heading_truth+heading_noise+heading_bias+np.deg2rad(heading_init)
 
@@ -158,7 +167,7 @@ barometer_bias=np.zeros([1,np.size(elevation_step)])
 
 #bias is estimated as FOGM
 for ii in range(np.size(elevation_step)-1):
-    barometer_bias[0,ii+1]=np.exp(-(1/barometer_tau)*dt[ii])*barometer_bias[0,ii]+np.random.normal(0, barometer_bias_sigma, 1)
+    barometer_bias[0,ii+1]=np.exp(-(1/barometer_tau)*dt[ii])*barometer_bias[0,ii]+np.random.normal(0, barometer_bias_sigma, size=None)
 
 barometer_measurment=elevation_step+barometer_noise+barometer_bias
 
@@ -186,28 +195,28 @@ plt.plot(truth_east,truth_north)
 # plt.plot(states_UKF[1,:],states_UKF[0,:])
 plt.legend(['raw','truth','UKF'])
 # %%
-#difference position measurments
-delta_x=np.diff(truth_x,prepend=0)
-delta_y=np.diff(truth_y,prepend=0)
-delta_z=np.diff(truth_z,prepend=0)
-dt_vel=np.diff(truth_time,prepend=0)
+
+ecef_step=np.zeros((3,len(east_step)))
+for ii in range((len(east_step))):
+    ecef_step[:,ii]=conversions.enu2ecef(east_step[ii],north_step[ii],0,init_LLA[0],init_LLA[1],init_LLA[2],deg=False)
+
+init_ecef=conversions.enu2ecef(0,0,0,init_LLA[0],init_LLA[1],init_LLA[2],deg=False)
+#difference position measurments ECEF
+delta_x=np.diff(ecef_step[0,:],prepend=init_ecef[0])
+delta_y=np.diff(ecef_step[1,:],prepend=init_ecef[1])
+delta_z=np.diff(ecef_step[2,:],prepend=init_ecef[2])
 
 #calculate velocities
-vel_x=np.divide(delta_x,dt_vel)
-vel_x[vel_x==np.inf]=0
-vel_x[vel_x==-np.inf]=0
-vel_x[0]=0
-vel_y=np.divide(delta_y,dt_vel)
-vel_y[vel_y==np.inf]=0
-vel_y[vel_y==-np.inf]=0
-vel_y[0]=0
-vel_z=np.divide(delta_z,dt_vel)
-vel_z[vel_z==np.inf]=0
-vel_z[vel_z==-np.inf]=0
-vel_z[0]=0
+vel_x=np.divide(delta_x,dt)
+vel_y=np.divide(delta_y,dt)
+vel_z=np.divide(delta_z,dt)
 
+vel_x = sosfiltfilt(sos, vel_x)
+vel_y = sosfiltfilt(sos, vel_y)
+vel_z = sosfiltfilt(sos, vel_z)
+# %%
 #use navsim to generate LEO observables
-rx_pos=truth_ecef
+rx_pos=ecef_step
 rx_vel=np.asarray([vel_x,vel_y,vel_z])
 
 #setting up navsim
@@ -224,45 +233,50 @@ sim.simulate()
 observables = sim.observables
 sat_states=sim.emitter_states
 
-sat_num=np.zeros((1,len(observables)))
+sats_in_view=[]
 #detrmining maximum number of LEO observables in run
 for ii in range((len(observables))):
     ind_observables=observables[ii]
-    sat_num[0,ii]=len(ind_observables)
+    ind_keys=list(ind_observables)
+    for kk in range((len(ind_observables))):
+        sats_in_view.append(ind_keys[kk])
 
+sats_in_view = list(dict.fromkeys(sats_in_view))
 #initializing LEO variables
-num_sats_max=max(sat_num.transpose())
-doppler=np.empty((int(num_sats_max[0]),len(observables)))
+num_sats_max=len(sats_in_view)
+doppler=np.empty((num_sats_max,len(observables)))
 doppler[:]=np.nan
-sat_pos=np.empty((int(num_sats_max[0]),len(observables),3))
+sat_pos=np.empty((num_sats_max,len(observables),3))
 sat_pos[:]=np.nan
-sat_vel=np.empty((int(num_sats_max[0]),len(observables),3))
+sat_vel=np.empty((num_sats_max,len(observables),3))
 sat_vel[:]=np.nan
 Hz=1
 Dt=1/Hz
-LEO_time=np.zeros((1,len(observables)+1))
+LEO_time=np.ones((1,len(observables)+1))
+LEO_time[0,0]=time_step[0]
 ephemeris=sat_states.ephemeris
 
-#pulling doppler
+#pulling doppler, sat positions, sat velocities
 for ii in range(len(observables)):
     ind_observables=observables[ii]
     keys=list(ind_observables)
     ephem_obs=ephemeris[ii]
     for kk in range((len(keys))):
-        Irid=ind_observables[keys[kk]]
-        doppler[kk,ii]=Irid.carrier_doppler
-
+        sat=ind_observables[keys[kk]]
+        lam=(299792458)/(1776e6)
+        idx=sats_in_view.index(keys[kk])
+        doppler[idx,ii]=(sat.carrier_doppler*-lam)
         Sat_state=ephem_obs[keys[kk]]
-        sat_pos[kk,ii,:]=Sat_state.pos
-        sat_vel[kk,ii,:]=Sat_state.vel
+        sat_pos[idx,ii,:]=Sat_state.pos
+        sat_vel[idx,ii,:]=Sat_state.vel
     LEO_time[0,ii+1]=LEO_time[0,ii]+Dt
 LEO_time=np.delete(LEO_time,-1)
 
 #creating LEO DF
 df_time_LEO=pd.DataFrame(LEO_time.transpose(),columns=['time'])
 df_doppler=pd.DataFrame()
-for ii in range((int(num_sats_max[0]))):
-    doppler_idx=pd.DataFrame(doppler[ii,:].transpose(),columns=[f'Doppler{ii}'])
+for ii in range((num_sats_max)):
+    doppler_idx=pd.DataFrame(doppler[ii,:].transpose(),columns=[sats_in_view[ii]])
     df_doppler=pd.concat([df_doppler,doppler_idx],axis=1)
 df_LEO=pd.concat([df_time_LEO,df_doppler],axis=1)
 
@@ -270,35 +284,73 @@ df_LEO=pd.concat([df_time_LEO,df_doppler],axis=1)
 input_data=pd.merge_ordered(df_PDR,df_LEO, on="time")
 input_data=input_data.to_numpy()
 
-heading_residual=0
-n=0
+#initializing storage variables
+heading_residual=heading_measurment[0,0]-heading_truth[0,0]
+n=1
+i=0
+sat_index=np.linspace(0,(num_sats_max)-1,(num_sats_max))
 East=0
 North=0
+East_stg=np.zeros((1,len(time_step)+1))
+North_stg=np.zeros((1,len(time_step)+1))
+leo_heading_stg=np.zeros((1,len(LEO_time)))
+
+#looping through input data
 for ii in range((len(input_data))):
+    #detected PDR measurement
     if ~np.isnan(input_data[ii,1]):
+        #delta positions
         delta_E=input_data[ii,2] * np.sin(input_data[ii,1]-heading_residual)
         delta_N=input_data[ii,2] * np.cos(input_data[ii,1]-heading_residual)
+
+        #velcoity
         Vel_E=delta_E/input_data[ii,3]
         Vel_N=delta_N/input_data[ii,3]
-        East=East+delta_E
-        North=North+delta_N
-        heading_stg=input_data[ii,1]
         if np.isnan(Vel_E):
             Vel_E=0
             Vel_N=0
-    if ~np.isnan(input_data[ii,4]):
-        dopps=input_data[ii,4:-1]
-        dopp_num=len(dopps)
-        dopp_pos=sat_pos[0:dopp_num,n,:]
-        dopp_vel=sat_vel[0:dopp_num,n,:]
-        n=n+1
+
+        #positions
+        East=East+delta_E
+        North=North+delta_N
+        East_stg[0,i+1]=East
+        North_stg[0,i+1]=North
+        i=i+1
+
+        #last heading value
+        heading_stg=input_data[ii,1]
+
+    #detected LEO measurment
+    if ~np.isnan(input_data[ii,4]) and ii>2:
+
+        #pull all dopplers in view
+        dopps=input_data[ii,4:]
+        sat_idx=sat_index[~np.isnan(dopps)]
+        dopps=np.delete(dopps,np.isnan(dopps))
+
+        #pull corresponding sat positions and velocities
+        dopp_pos=np.zeros((len(sat_idx),3))
+        dopp_vel=np.zeros((len(sat_idx),3))
+        for kk in range((len(sat_idx))):
+            dopp_pos[kk,:]=sat_pos[int(sat_idx[kk]),n,:]
+            dopp_vel[kk,:]=sat_vel[int(sat_idx[kk]),n,:]
+
+        #pull user positions and velocities
         user_pos=np.asarray([East,North])
         user_vel=np.asarray([Vel_E,Vel_N])
+        if n==25:
+            o=1
+        leo_heading=leo_pdr_heading_enu(init_LLA,dopps,user_pos,user_vel,dopp_pos,dopp_vel)
+        leo_heading_stg[0,n]=leo_heading
+        # heading_residual=heading_stg-leo_heading
+        n=n+1
 
-        leo_heading=leo_pdr_heading(init_LLA,dopps,user_pos,user_vel,dopp_pos,dopp_vel)
-        p=1
+leo_heading_stg[0,0]=heading_truth[0,0]
+plt.plot(East_stg[0,:],North_stg[0,:])
 
-    
-    
+plt.figure()
+plt.plot(LEO_time,np.rad2deg(leo_heading_stg[0,:]))
+plt.plot(time_step,np.rad2deg(heading_truth[0,:]))
+plt.plot(time_step,np.rad2deg(heading_measurment[0,:]))
 
 # %%
