@@ -16,42 +16,42 @@ def unit_vectors(rx_pos:np.ndarray,sat_pos:np.ndarray):
     unit_vectors = sat_rel_pos / ranges[:,None]
     return unit_vectors,ranges
 
-def leo_pdr_heading(lla_0:np.array,
-                    measured_doppler:np.array,
-                    current_pos:np.array,
-                    current_vel:np.array,
-                    sat_pos:np.array,
-                    sat_vel:np.array):
+# def leo_pdr_heading(lla_0:np.array,
+#                     measured_doppler:np.array,
+#                     current_pos:np.array,
+#                     current_vel:np.array,
+#                     sat_pos:np.array,
+#                     sat_vel:np.array):
     
-    # 0 vertical pos and vel
-    current_ecef = conversions.enu2ecef(current_pos[0],current_pos[1],0,lla_0[0],lla_0[1],lla_0[2],deg=False)
-    current_ecef_vel = conversions.enu2uvw(current_vel[0],current_vel[1],0,lla_0[0],lla_0[1],deg=False)
+#     # 0 vertical pos and vel
+#     current_ecef = conversions.enu2ecef(current_pos[0],current_pos[1],0,lla_0[0],lla_0[1],lla_0[2],deg=False)
+#     current_ecef_vel = conversions.enu2uvw(current_vel[0],current_vel[1],0,lla_0[0],lla_0[1],deg=False)
     
-    # Unit Vectors and gemoetry, we'll see how the clock bias assumption goes
-    u_vecs,_ = unit_vectors(current_ecef,sat_pos)
+#     # Unit Vectors and gemoetry, we'll see how the clock bias assumption goes
+#     u_vecs,_ = unit_vectors(current_ecef,sat_pos)
 
-    # Estimated dopplers are velocity difference projected onto unit vectors
-    sat_rel_vel = sat_vel - current_ecef_vel
-    dopp_hat = []
+#     # Estimated dopplers are velocity difference projected onto unit vectors
+#     sat_rel_vel = sat_vel - current_ecef_vel
+#     dopp_hat = []
 
-    num_sats = np.ma.size(u_vecs,0)
-    for count in range(num_sats):
-        dopp_hat.append(np.dot(u_vecs[count,:],sat_rel_vel[count,:]))
+#     num_sats = np.ma.size(u_vecs,0)
+#     for count in range(num_sats):
+#         dopp_hat.append(np.dot(u_vecs[count,:],sat_rel_vel[count,:]))
         
-    y_hat = np.array(dopp_hat)
+#     y_hat = np.array(dopp_hat)
 
-    # Estimate user velocities
-    del_y = measured_doppler - y_hat
-    vel_est = np.linalg.pinv(u_vecs)@del_y
+#     # Estimate user velocities
+#     del_y = measured_doppler - y_hat
+#     vel_est = np.linalg.pinv(u_vecs)@del_y
 
-    # Rotate back into enu
-    # vel_est_enu = conversions.ecef2enu(vel_est[0],vel_est[1],vel_est[2],lla_0[0],lla_0[1],lla_0[2],deg=False)
-    vel_est_enu = pm.ecef2enuv(vel_est[0],vel_est[1],vel_est[2],lla_0[0],lla_0[1],deg=False)
+#     # Rotate back into enu
+#     # vel_est_enu = conversions.ecef2enu(vel_est[0],vel_est[1],vel_est[2],lla_0[0],lla_0[1],lla_0[2],deg=False)
+#     vel_est_enu = pm.ecef2enuv(vel_est[0],vel_est[1],vel_est[2],lla_0[0],lla_0[1],deg=False)
 
-    # Estimate heading
-    heading = math.atan2(vel_est_enu[0],vel_est_enu[1])
+#     # Estimate heading
+#     heading = math.atan2(vel_est_enu[0],vel_est_enu[1])
 
-    return heading
+#     return heading
 
 
 def leo_pdr_heading_enu(lla_0:np.array,
@@ -79,23 +79,12 @@ def leo_pdr_heading_enu(lla_0:np.array,
     # Unit Vectors and gemoetry, we'll see how the clock bias assumption goes
     u_vecs,_ = unit_vectors(current_pos,sat_pos_enu)
 
-    # Estimated dopplers are velocity difference projected onto unit vectors
-    sat_rel_vel = sat_vel_enu - current_vel
-    dopp_hat = []
-
-    
+    del_y = []
     for count in range(num_sats):
-        dopp_hat.append(np.dot(u_vecs[count,0:2],sat_rel_vel[count,0:2]) + u_vecs[count,2]*sat_vel_enu[count,2])
-        
-    y_hat = np.array(dopp_hat)
+        del_y.append(measured_doppler[count] - np.dot(u_vecs[count,:],sat_vel_enu[count,:]))
 
     # Estimate user velocities
-    del_y = measured_doppler - y_hat
-    vel_est = np.linalg.pinv(u_vecs[:,0:2])@del_y
-
-    # Rotate back into enu
-    # vel_est_enu = conversions.ecef2enu(vel_est[0],vel_est[1],vel_est[2],lla_0[0],lla_0[1],lla_0[2],deg=False)
-    # vel_est_enu = pm.ecef2enuv(vel_est[0],vel_est[1],vel_est[2],lla_0[0],lla_0[1],deg=False)
+    vel_est = np.linalg.pinv(-u_vecs[:,0:2])@del_y
 
     # Estimate heading
     heading = math.atan2(vel_est[0],vel_est[1])
