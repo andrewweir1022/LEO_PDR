@@ -1,3 +1,4 @@
+# %%
 import numpy as np
 import navsim as ns
 
@@ -16,8 +17,5 @@ sim = ns.get_signal_simulation(
 
 sim.generate_truth(rx_pos=rx_pos)
 sim.simulate()
-
 observables = sim.observables
-
-print()
 #sim.to_hdf(output_dir_path=DATA_PATH)

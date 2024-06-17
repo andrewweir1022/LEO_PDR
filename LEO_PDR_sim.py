@@ -13,7 +13,7 @@ import navsim as ns
 # import pvlib.location as pv
 # import Baro_UKF as baro
 import pandas as pd
-from heading_calculation import leo_pdr_heading_enu, leo_pdr_heading
+from heading_calculation import leo_pdr_heading_enu
 import navtools.conversions as conversions
 
 #Open Config file
@@ -207,7 +207,7 @@ InterpolatorEas = interpolate.interp1d(time, east, fill_value="extrapolate")
 
 Hz=1
 LEO_end=189
-LEO_time=np.linspace(0,LEO_end,LEO_end*Hz)
+LEO_time=np.linspace(0,LEO_end,LEO_end*Hz+1)
 east_LEO=InterpolatorEas(LEO_time)
 north_LEO=InterpolatorNor(LEO_time)
 # %%
@@ -334,7 +334,7 @@ for ii in range((len(input_data))):
         heading_stg=input_data[ii,1]
 
     #detected LEO measurment
-    if ~np.isnan(input_data[ii,4]) and ii>2:
+    if any(~np.isnan(input_data[ii,4:])) and ii>1:
 
         #pull all dopplers in view
         dopps=input_data[ii,4:]

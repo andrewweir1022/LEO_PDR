@@ -1,6 +1,6 @@
 time:
-  duration: 190.0 # [s]
-  fsim: 1 # [Hz]
+  duration: 189.0 # [s]
+  fsim: 10 # [Hz]
   year: 2023
   month: 10
   day: 14
@@ -15,6 +15,9 @@ constellations:
     iridium-next:
       signal: freedom
       js: 0.0
+    # starlink:
+    #   signal: freedom
+    #   js: 0.0
 
 # errors:
 #   ionosphere: tec_map
