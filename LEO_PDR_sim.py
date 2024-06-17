@@ -195,10 +195,26 @@ plt.plot(truth_east,truth_north)
 # plt.plot(states_UKF[1,:],states_UKF[0,:])
 plt.legend(['raw','truth','UKF'])
 # %%
+east=np.insert(east_step,0,0)
+north=np.insert(north_step,0,0)
+time=np.insert(time_step,0,0)
+samples=np.linspace(0,len(time),len(time))
+samples_up=np.linspace(0,len(time),len(time)*100)
+InterpolatorTime = interpolate.interp1d(samples, time, fill_value="extrapolate")
+time_up=InterpolatorTime(samples_up)
+InterpolatorNor = interpolate.interp1d(time, north, fill_value="extrapolate")
+InterpolatorEas = interpolate.interp1d(time, east, fill_value="extrapolate")
 
-ecef_step=np.zeros((3,len(east_step)))
-for ii in range((len(east_step))):
-    ecef_step[:,ii]=conversions.enu2ecef(east_step[ii],north_step[ii],0,init_LLA[0],init_LLA[1],init_LLA[2],deg=False)
+Hz=1
+LEO_end=189
+LEO_time=np.linspace(0,LEO_end,LEO_end*Hz)
+east_LEO=InterpolatorEas(LEO_time)
+north_LEO=InterpolatorNor(LEO_time)
+# %%
+ecef_step=np.zeros((3,len(east_LEO)))
+for ii in range((len(east_LEO))):
+    ecef_step[:,ii]=conversions.enu2ecef(east_LEO[ii],north_LEO[ii],0,init_LLA[0],init_LLA[1],init_LLA[2],deg=False)
+
 
 init_ecef=conversions.enu2ecef(0,0,0,init_LLA[0],init_LLA[1],init_LLA[2],deg=False)
 #difference position measurments ECEF
@@ -206,15 +222,18 @@ delta_x=np.diff(ecef_step[0,:],prepend=init_ecef[0])
 delta_y=np.diff(ecef_step[1,:],prepend=init_ecef[1])
 delta_z=np.diff(ecef_step[2,:],prepend=init_ecef[2])
 
+dt_LEO=np.diff(LEO_time,prepend=0)
+dt_LEO[0]=dt_LEO[1]
+
 #calculate velocities
-vel_x=np.divide(delta_x,dt)
-vel_y=np.divide(delta_y,dt)
-vel_z=np.divide(delta_z,dt)
+vel_x=np.divide(delta_x,dt_LEO)
+vel_y=np.divide(delta_y,dt_LEO)
+vel_z=np.divide(delta_z,dt_LEO)
 
 vel_x = sosfiltfilt(sos, vel_x)
 vel_y = sosfiltfilt(sos, vel_y)
 vel_z = sosfiltfilt(sos, vel_z)
-# %%
+
 #use navsim to generate LEO observables
 rx_pos=ecef_step
 rx_vel=np.asarray([vel_x,vel_y,vel_z])
@@ -250,10 +269,6 @@ sat_pos=np.empty((num_sats_max,len(observables),3))
 sat_pos[:]=np.nan
 sat_vel=np.empty((num_sats_max,len(observables),3))
 sat_vel[:]=np.nan
-Hz=1
-Dt=1/Hz
-LEO_time=np.ones((1,len(observables)+1))
-LEO_time[0,0]=time_step[0]
 ephemeris=sat_states.ephemeris
 
 #pulling doppler, sat positions, sat velocities
@@ -269,8 +284,6 @@ for ii in range(len(observables)):
         Sat_state=ephem_obs[keys[kk]]
         sat_pos[idx,ii,:]=Sat_state.pos
         sat_vel[idx,ii,:]=Sat_state.vel
-    LEO_time[0,ii+1]=LEO_time[0,ii]+Dt
-LEO_time=np.delete(LEO_time,-1)
 
 #creating LEO DF
 df_time_LEO=pd.DataFrame(LEO_time.transpose(),columns=['time'])
