@@ -2,13 +2,13 @@
 #input Mat_file to include: Lat, Lon, Alt, time, course, course time
 PathToInput: /home/anw0060/Documents/gnss_plus/LEO_PDR/Input_trajectory/Short_Trajectory.mat
 
-StepLengthNoise: 0.5 #meters
-HeadingNoise: 5 #degrees
-HeadingInit: 10 #degrees
+StepLengthNoise: 0.001 #meters
+HeadingNoise: 0.001 #degrees
+HeadingInit: 0 #degrees
 DeltaPositionNoise: 1 #meters
 
 HeadingBiasTau: 360
-HeadingBiasNoise: 1 #degrees
+HeadingBiasNoise: 0.0001 #degrees
 
 BarometerBiasTau: 300
 BarometerBiasNoise: 0.0001 #meters
